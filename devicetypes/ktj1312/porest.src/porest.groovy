@@ -20,23 +20,21 @@ import groovy.json.JsonSlurper
 
 metadata {
     definition(name: "Porest", namespace: "ktj1312", author: "ktj1312", vid: "SmartThings-Porest", ocfDeviceType: "x.com.st.d.airqualitysensor") {
-        capability "Air Quality Sensor" // Awair Score
-        capability "Carbon Dioxide Measurement" // co : clear, detected
-        capability "Fine Dust Sensor"
-        capability "Temperature Measurement"
-        capability "Relative Humidity Measurement"
-        capability "Tvoc Measurement"
-        capability "Illuminance Measurement"
-        capability "Sound Pressure Level"
-        capability "Battery"
-        capability "Power Source"
+        capability "Air Quality Sensor"
+        capability "Carbon Monoxide Measurement"    // co
+        capability "Carbon Dioxide Measurement"     // co2
+        capability "Fine Dust Sensor"               // pm2_5
+        capability "Temperature Measurement"        // temperature
+        capability "Relative Humidity Measurement"  // humidity
+        capability "Tvoc Measurement"               // tvoc
         capability "Sensor"
 
         command "refresh"
     }
 
     preferences {
-        input "awairAddress", "text", type: "text", title: "어웨어 IP 주소", description: "enter awair address must be [ip]:[port] ", required: true
+        input "devMuid", "text", type: "text", title: "디바이스 MUID", description: "enter device muid", required: true
+        input "devSecret", "text", type: "text", title: "디바이스 Secret", description: "enter device secret", required: true
         input type: "paragraph", element: "paragraph", title: "Version", description: version(), displayDuringSetup: false
     }
 
@@ -45,8 +43,8 @@ metadata {
     }
 
     tiles {
-        multiAttributeTile(name: "airQuality", type: "generic", width: 6, height: 4) {
-            tileAttribute("device.airQuality", key: "PRIMARY_CONTROL") {
+        multiAttributeTile(name: "Temperature", type: "generic", width: 6, height: 4) {
+            tileAttribute("device.Temperature", key: "PRIMARY_CONTROL") {
                 attributeState('default', label: '${currentValue}')
             }
 
@@ -67,6 +65,10 @@ metadata {
             state "default", label: '${currentValue}'
         }
 
+        valueTile("co_value", "device.carbonMonoxide", decoration: "flat") {
+            state "default", label: '${currentValue}'
+        }
+
         valueTile("voc_value", "device.tvocLevel", decoration: "flat") {
             state "default", label: '${currentValue}'
         }
@@ -75,39 +77,19 @@ metadata {
             state "default", label: '${currentValue}', unit: "㎍/㎥"
         }
 
-        valueTile("lux_value", "device.illuminance", decoration: "flat") {
-            state "default", label: '${currentValue}'
-        }
-
-        valueTile("spl_value", "device.soundPressureLevel", decoration: "flat") {
-            state "default", label: '${currentValue}', unit: "db"
-        }
-
-        valueTile("battery", "device.battery", decoration: "flat") {
-            state "default", label: '${currentValue}%'
-        }
-
-        valueTile("powerSource", "device.powerSource", decoration: "flat") {
-            state "dc", label: "Plugged"
-            state "battery", label: "Battery"
-        }
-
         standardTile("refresh_air_value", "", width: 1, height: 1, decoration: "flat") {
             state "default", label: "", action: "refresh", icon: "st.secondary.refresh"
         }
 
-        main(["airQuality"])
+        main(["Temperature"])
         details([
-                "airQuality",
+                "Temperature",
                 "temperature_value",
                 "humidity_value",
                 "co2_value",
+                "co_value",
                 "voc_value",
                 "pm25_value",
-                "lux_value",
-                "spl_value",
-                "powerSource",
-                "battery",
                 "refresh_air_value"
         ])
     }
@@ -143,75 +125,56 @@ def init(){
 def refresh() {
     log.debug "refresh()"
 
-    if(awairAddress){
+    if(devMuid || devSecret){
         updateAirData()
-        updateDeviceData()
         def now = new Date().format("yyyy-MM-dd HH:mm:ss", location.timeZone)
         sendEvent(name: "lastCheckin", value: now, displayed: false)
     }
-    else log.error "Missing settings awairAddress"
+    else log.error "Missing settings devMuid or devSecret"
 }
 
 def updateAirData(){
     def options = [
+            "uri":"https://onem2m.medbiz.or.kr/Mobius/" + "${devMuid}" + "/fields/data/latest",
             "method": "GET",
-            "path": "/air-data/latest",
             "headers": [
-                    "HOST": "${awairAddress}"
+                    "X-M2M-Origin": "${devSecret}",
+                    "X-M2M-RI":"SmartThings" + "${devMuid}"
             ]
     ]
 
-    def myhubAction = new physicalgraph.device.HubAction(options, null, [callback: updateAirdataValues])
-    sendHubCommand(myhubAction)
+    def respMap = getHttpGetJson(options)
+    updateAirdataValues(respMap)
+
 }
 
-def updateDeviceData(){
-    def options = [
-            "method": "GET",
-            "path": "/settings/config/data",
-            "headers": [
-                    "HOST": "${awairAddress}"
-            ]
-    ]
+def updateAirdataValues(resp){
+    resp = resp.'m2m:cin'.con
 
-    def myhubAction = new physicalgraph.device.HubAction(options, null, [callback: updateDeviceValues])
-    sendHubCommand(myhubAction)
-}
-
-def updateAirdataValues(physicalgraph.device.HubResponse hubResponse){
-
-    def msg
     try {
-        msg = parseLanMessage(hubResponse.description)
-
-        def resp = new JsonSlurper().parseText(msg.body)
-
-        sendEvent(name: "airQuality", value: resp.score, displayed: true)
-        sendEvent(name: "temperature", value: resp.temp, displayed: true)
-        sendEvent(name: "humidity", value: resp.humid, displayed: true)
+        sendEvent(name: "temperature", value: resp.temperature, displayed: true)
+        sendEvent(name: "humidity", value: resp.humidity, displayed: true)
+        sendEvent(name: "carbonMonoxide", value: resp.co, displayed: true)
         sendEvent(name: "carbonDioxide", value: resp.co2, displayed: true)
-        sendEvent(name: "tvocLevel", value: resp.voc, displayed: true)
-        sendEvent(name: "fineDustLevel", value: resp.pm25, displayed: true)
-        sendEvent(name: "illuminance", value: resp.lux, displayed: true)
-        sendEvent(name: "soundPressureLevel", value: resp.spl_a, displayed: true)
-
+        sendEvent(name: "tvocLevel", value: resp.tvoc, displayed: true)
+        sendEvent(name: "fineDustLevel", value: resp.pm2_5, displayed: true)
     } catch (e) {
         log.error "Exception caught while parsing data: "+e;
     }
 }
 
-def updateDeviceValues(physicalgraph.device.HubResponse hubResponse){
-
-    def msg
+private getHttpGetJson(param) {
+    log.debug "getHttpGetJson>> params : ${param}"
+    def jsonMap = null
     try {
-        msg = parseLanMessage(hubResponse.description)
-
-        def resp = new JsonSlurper().parseText(msg.body)
-
-        sendEvent(name: "battery", value: resp."power-status".battery as Integer , unit: "%")
-        sendEvent(name: "powerSource", value: resp."power-status".plugged ? "dc" : "battery")
-
-    } catch (e) {
-        log.error "Exception caught while parsing data: "+e;
+        httpGet(param) { resp ->
+            log.debug "getHttpGetJson>> resp: ${resp.data}"
+            jsonMap = resp.data
+        }
+    } catch(groovyx.net.http.HttpResponseException e) {
+        log.error "getHttpGetJson>> HTTP Get Error : ${e}"
     }
+
+    return jsonMap
+
 }
