@@ -131,7 +131,6 @@ def refresh() {
 
     if(devMuid || devSecret){
         updateAirData()
-        updateDeviceData()
         def now = new Date().format("yyyy-MM-dd HH:mm:ss", location.timeZone)
         sendEvent(name: "lastCheckin", value: now, displayed: false)
     }
@@ -161,14 +160,11 @@ def updateAirdataValues(resp){
 
         def resp = new JsonSlurper().parseText(msg.body)
 
-        sendEvent(name: "airQuality", value: resp.score, displayed: true)
-        sendEvent(name: "temperature", value: resp.temp, displayed: true)
-        sendEvent(name: "humidity", value: resp.humid, displayed: true)
+        sendEvent(name: "temperature", value: resp.temperature, displayed: true)
+        sendEvent(name: "humidity", value: resp.humidity, displayed: true)
         sendEvent(name: "carbonDioxide", value: resp.co2, displayed: true)
-        sendEvent(name: "tvocLevel", value: resp.voc, displayed: true)
-        sendEvent(name: "fineDustLevel", value: resp.pm25, displayed: true)
-        sendEvent(name: "illuminance", value: resp.lux, displayed: true)
-        sendEvent(name: "soundPressureLevel", value: resp.spl_a, displayed: true)
+        sendEvent(name: "tvocLevel", value: resp.tvoc, displayed: true)
+        sendEvent(name: "fineDustLevel", value: resp.pm2_5, displayed: true)
 
     } catch (e) {
         log.error "Exception caught while parsing data: "+e;
