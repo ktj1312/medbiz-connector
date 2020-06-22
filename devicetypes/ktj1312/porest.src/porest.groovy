@@ -1,5 +1,5 @@
 /**
- *  Awair
+ *  Porest
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  *  in compliance with the License. You may obtain a copy of the License at:
@@ -11,29 +11,31 @@
  *  for the specific language governing permissions and limitations under the License.
  *
  */
-public static String version() { return "v0.0.2.20200523" }
+public static String version() { return "v0.0.1.20200622" }
 /*
- *   2020/02/24 >>> v0.0.1.20200224 - Initialize
- *   2020/05/23 >>> v0.0.2.20200523 - Add sendEvent Displayed option
+ *   2020/06/22 >>> v0.0.1.20200622 - Initialize
  */
 import groovy.json.*
 import groovy.json.JsonSlurper
 
 metadata {
-    definition(name: "Awair-R2-Local", namespace: "ktj1312", author: "ktj1312", vid: "SmartThings-Awair-Local", ocfDeviceType: "x.com.st.d.airqualitysensor") {
-        capability "Air Quality Sensor" // Awair Score
-        capability "Carbon Dioxide Measurement" // co : clear, detected
-        capability "Fine Dust Sensor"
-        capability "Temperature Measurement"
-        capability "Relative Humidity Measurement"
-        capability "Tvoc Measurement"
+    definition(name: "Porest", namespace: "ktj1312", author: "ktj1312", vid: "SmartThings-Porest", ocfDeviceType: "x.com.st.d.airqualitysensor") {
+        capability "Air Quality Sensor"
+        capability "Carbon Monoxide Measurement"    // co
+        capability "Carbon Dioxide Measurement"     // co2
+        capability "Dust Sensor"                    // pm10
+        capability "Fine Dust Sensor"               // pm2_5
+        capability "Temperature Measurement"        // temperature
+        capability "Relative Humidity Measurement"  // humidity
+        capability "Tvoc Measurement"               // tvoc
         capability "Sensor"
 
         command "refresh"
     }
 
     preferences {
-        input "awairAddress", "text", type: "text", title: "어웨어 IP 주소", description: "enter awair address must be [ip]:[port] ", required: true
+        input "devMuid", "text", type: "text", title: "디바이스 MUID", description: "enter device muid", required: true
+        input "devSecret", "text", type: "text", title: "디바이스 Secret", description: "enter device secret", required: true
         input type: "paragraph", element: "paragraph", title: "Version", description: version(), displayDuringSetup: false
     }
 
@@ -42,8 +44,8 @@ metadata {
     }
 
     tiles {
-        multiAttributeTile(name: "airQuality", type: "generic", width: 6, height: 4) {
-            tileAttribute("device.airQuality", key: "PRIMARY_CONTROL") {
+        multiAttributeTile(name: "Temperature", type: "generic", width: 6, height: 4) {
+            tileAttribute("device.Temperature", key: "PRIMARY_CONTROL") {
                 attributeState('default', label: '${currentValue}')
             }
 
@@ -64,8 +66,16 @@ metadata {
             state "default", label: '${currentValue}'
         }
 
+        valueTile("co_value", "device.carbonMonoxide", decoration: "flat") {
+            state "default", label: '${currentValue}'
+        }
+
         valueTile("voc_value", "device.tvocLevel", decoration: "flat") {
             state "default", label: '${currentValue}'
+        }
+
+        valueTile("pm10_value", "device.DustLevel", decoration: "flat") {
+            state "default", label: '${currentValue}', unit: "㎍/㎥"
         }
 
         valueTile("pm25_value", "device.fineDustLevel", decoration: "flat") {
@@ -76,9 +86,9 @@ metadata {
             state "default", label: "", action: "refresh", icon: "st.secondary.refresh"
         }
 
-        main(["airQuality"])
+        main(["Temperature"])
         details([
-                "airQuality",
+                "Temperature",
                 "temperature_value",
                 "humidity_value",
                 "co2_value",
@@ -119,43 +129,64 @@ def init(){
 def refresh() {
     log.debug "refresh()"
 
-    if(awairAddress){
+    if(devMuid || devSecret){
         updateAirData()
+        updateDeviceData()
         def now = new Date().format("yyyy-MM-dd HH:mm:ss", location.timeZone)
         sendEvent(name: "lastCheckin", value: now, displayed: false)
     }
-    else log.error "Missing settings awairAddress"
+    else log.error "Missing settings devMuid or devSecret"
 }
 
 def updateAirData(){
     def options = [
+            "uri":"https://onem2m.medbiz.or.kr/Mobius/" + "${devMuid}" + "/fields/data/latest",
             "method": "GET",
-            "path": "/air-data/latest",
             "headers": [
-                    "HOST": "${awairAddress}"
+                    "X-M2M-Origin": "${devSecret}",
+                    "X-M2M-RI":"SmartThings" + "${devMuid}"
             ]
     ]
 
-    def myhubAction = new physicalgraph.device.HubAction(options, null, [callback: updateAirdataValues])
-    sendHubCommand(myhubAction)
+    def respMap = getHttpGetJson(options)
+    updateAirdataValues(respMap)
+
 }
 
-def updateAirdataValues(physicalgraph.device.HubResponse hubResponse){
+def updateAirdataValues(resp){
 
     def msg
     try {
         msg = parseLanMessage(hubResponse.description)
 
         def resp = new JsonSlurper().parseText(msg.body)
-      
+
         sendEvent(name: "airQuality", value: resp.score, displayed: true)
         sendEvent(name: "temperature", value: resp.temp, displayed: true)
         sendEvent(name: "humidity", value: resp.humid, displayed: true)
         sendEvent(name: "carbonDioxide", value: resp.co2, displayed: true)
         sendEvent(name: "tvocLevel", value: resp.voc, displayed: true)
         sendEvent(name: "fineDustLevel", value: resp.pm25, displayed: true)
+        sendEvent(name: "illuminance", value: resp.lux, displayed: true)
+        sendEvent(name: "soundPressureLevel", value: resp.spl_a, displayed: true)
 
     } catch (e) {
         log.error "Exception caught while parsing data: "+e;
     }
+}
+
+private getHttpGetJson(param) {
+    log.debug "getHttpGetJson>> params : ${param}"
+    def jsonMap = null
+    try {
+        httpGet(param) { resp ->
+            log.debug "getHttpGetJson>> resp: ${resp.data}"
+            jsonMap = resp.data
+        }
+    } catch(groovyx.net.http.HttpResponseException e) {
+        log.error "getHttpGetJson>> HTTP Get Error : ${e}"
+    }
+
+    return jsonMap
+
 }
